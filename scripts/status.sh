@@ -41,7 +41,7 @@ echo "📅 Date: $(date)"
 echo "⏰ Uptime: $(uptime -p)"
 
 # Get server IP
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo "🌐 Server IP: ${SERVER_IP:-'Unknown'}"
 
 print_step "Service Status"

@@ -56,7 +56,7 @@ print_status "🎯 Project directory: $PROJECT_DIR"
 print_status "🖥️  Operating System: $(lsb_release -d | cut -f2)"
 
 # Get server IP for display
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 print_status "🌐 Server IP: ${SERVER_IP:-'Detecting...'}"
 
 # Confirmation
@@ -346,7 +346,7 @@ cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 start ecosystem.config.js 2>/dev/null || sudo -u movie-app pm2 restart movie-recommender
 sudo systemctl start nginx
 
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo "✅ Services started"
 echo "🌐 Access URLs:"
 echo "  External: http://$SERVER_IP/"
@@ -367,7 +367,7 @@ cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 restart movie-recommender 2>/dev/null || sudo -u movie-app pm2 start ecosystem.config.js
 sudo systemctl reload nginx
 
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo "🔄 Services restarted"
 echo "🌐 Access at: http://$SERVER_IP/"
 SCRIPT_EOF
@@ -411,7 +411,7 @@ fi
 
 # Update server IP if not detected earlier
 if [[ -z "$SERVER_IP" ]]; then
-    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 fi
 
 print_step "Deployment Complete! 🎉"

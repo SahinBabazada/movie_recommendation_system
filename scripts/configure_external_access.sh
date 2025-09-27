@@ -209,7 +209,7 @@ fi
 print_step "External Access Information"
 
 # Get server IP
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo ""
 echo "🎉 External Access Configuration Complete!"

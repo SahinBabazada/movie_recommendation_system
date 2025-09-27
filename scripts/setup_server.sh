@@ -184,7 +184,7 @@ apt autoremove -y
 apt autoclean
 
 # Get server IP for display
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 print_status "✅ Server setup completed successfully!"
 print_status "🔧 Dependencies installed:"

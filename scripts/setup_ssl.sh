@@ -77,7 +77,7 @@ fi
 # Check if domain resolves to this server
 print_status "Checking domain resolution..."
 DOMAIN_IP=$(dig +short "$DOMAIN" @8.8.8.8 || echo "")
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 if [[ -n "$DOMAIN_IP" ]] && [[ "$DOMAIN_IP" == "$SERVER_IP" ]]; then
     print_status "✅ Domain resolves correctly to this server"

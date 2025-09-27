@@ -92,7 +92,7 @@ fi
 print_step "Access Information"
 
 # Get server IP
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo ""
 echo "🌐 Access your Movie Recommendation System:"
