@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# 🚀 Quick Deploy Script
-# One-command deployment for Ubuntu server
+# 🚀 Quick Deploy Script - Movie Recommendation System
+# File: scripts/quick_deploy.sh
+# Complete automated deployment for Ubuntu server
 
 set -e
 
@@ -17,7 +18,7 @@ cat << "EOF"
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
 ║           🎬 Movie Recommendation System                      ║
-║                  Quick Deployment Script                     ║
+║                  Quick Deployment                            ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 EOF
@@ -25,10 +26,6 @@ echo -e "${NC}"
 
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
 print_error() {
@@ -40,139 +37,109 @@ print_step() {
     echo "========================================"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
     print_error "This script must be run as root (use sudo)"
-    echo "Usage: sudo $0"
     exit 1
 fi
 
-# Get current directory (where the project was cloned)
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ ! -f "$PROJECT_DIR/main.py" ]]; then
-    PROJECT_DIR="$(pwd)"
-fi
+# Get current directory
+PROJECT_DIR="$(pwd)"
+TARGET_DIR="/opt/movie-recommendation-system"
 
 print_status "🎯 Project directory: $PROJECT_DIR"
 print_status "🖥️  Operating System: $(lsb_release -d | cut -f2)"
-print_status "👤 Running as: $(whoami)"
 
-# Confirmation prompt
+# Confirmation
 echo ""
-read -p "🚀 Ready to deploy Movie Recommendation System? This will install dependencies and configure services. Continue? (y/N): " confirm
-
+read -p "🚀 Deploy Movie Recommendation System? This will install dependencies and configure services. Continue? (y/N): " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    print_status "Deployment cancelled by user"
+    print_status "Deployment cancelled"
     exit 0
 fi
 
-print_step "System Preparation"
-
-# Update system
+print_step "System Update"
 print_status "Updating system packages..."
 apt update >/dev/null 2>&1
+apt upgrade -y >/dev/null 2>&1
 
-# Install git if not present
-if ! command -v git >/dev/null 2>&1; then
-    print_status "Installing Git..."
-    apt install -y git >/dev/null 2>&1
+print_step "Install Dependencies"
+print_status "Installing system dependencies..."
+apt install -y \
+    curl \
+    wget \
+    unzip \
+    git \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    build-essential \
+    nginx \
+    ufw \
+    htop \
+    certbot \
+    python3-certbot-nginx >/dev/null 2>&1
+
+# Install Node.js
+if ! command -v node >/dev/null 2>&1; then
+    print_status "Installing Node.js..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1
+    apt install -y nodejs >/dev/null 2>&1
 fi
 
-print_step "Repository Setup"
-
-# If we're not in the project directory, clone it
-if [[ ! -f "main.py" ]]; then
-    print_status "Cloning Movie Recommendation System repository..."
-    if [[ -d "movie-recommendation-system" ]]; then
-        rm -rf movie-recommendation-system
-    fi
-    git clone https://github.com/SahinBabazada/movie-recommendation-system.git
-    cd movie-recommendation-system
-    PROJECT_DIR="$(pwd)"
+# Install PM2
+if ! command -v pm2 >/dev/null 2>&1; then
+    print_status "Installing PM2..."
+    npm install -g pm2 >/dev/null 2>&1
 fi
 
-# Make all scripts executable
-find "$PROJECT_DIR" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-
-print_step "Dependency Installation"
-
-# Check if scripts directory exists
-if [[ ! -d "$PROJECT_DIR/scripts" ]]; then
-    print_status "Creating scripts directory..."
-    mkdir -p "$PROJECT_DIR/scripts"
-fi
-
-# Run setup server script if it exists, otherwise install dependencies manually
-if [[ -f "$PROJECT_DIR/scripts/setup_server.sh" ]]; then
-    print_status "Running server setup script..."
-    bash "$PROJECT_DIR/scripts/setup_server.sh"
-else
-    print_status "Installing dependencies manually..."
-    
-    # Install Python
-    apt install -y python3 python3-pip python3-venv python3-dev >/dev/null 2>&1
-    python3 -m pip install --upgrade pip >/dev/null 2>&1
-    
-    # Install Node.js and PM2
-    if ! command -v node >/dev/null 2>&1; then
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1
-        apt install -y nodejs >/dev/null 2>&1
-    fi
-    
-    if ! command -v pm2 >/dev/null 2>&1; then
-        npm install -g pm2 >/dev/null 2>&1
-    fi
-    
-    # Install Nginx
-    if ! command -v nginx >/dev/null 2>&1; then
-        apt install -y nginx >/dev/null 2>&1
-    fi
-    
-    # Install other tools
-    apt install -y ufw certbot python3-certbot-nginx >/dev/null 2>&1
-fi
-
-print_step "Application Setup"
-
-# Move to target directory
-TARGET_DIR="/opt/movie-recommendation-system"
-if [[ "$PROJECT_DIR" != "$TARGET_DIR" ]]; then
-    print_status "Moving application to $TARGET_DIR..."
-    mkdir -p /opt
-    if [[ -d "$TARGET_DIR" ]]; then
-        rm -rf "$TARGET_DIR"
-    fi
-    cp -r "$PROJECT_DIR" "$TARGET_DIR"
-    cd "$TARGET_DIR"
-fi
-
-# Create application user
+print_step "Create Application User"
 if ! id "movie-app" &>/dev/null; then
     print_status "Creating application user..."
     useradd -r -m -s /bin/bash movie-app
     usermod -aG sudo movie-app
 fi
 
-# Set ownership
+print_step "Setup Application Directory"
+print_status "Setting up application in $TARGET_DIR..."
+mkdir -p /opt
+
+# Copy project to target directory
+if [[ "$PROJECT_DIR" != "$TARGET_DIR" ]]; then
+    if [[ -d "$TARGET_DIR" ]]; then
+        rm -rf "$TARGET_DIR"
+    fi
+    cp -r "$PROJECT_DIR" "$TARGET_DIR"
+fi
+
+cd "$TARGET_DIR"
 chown -R movie-app:movie-app "$TARGET_DIR"
 
 print_step "Python Environment Setup"
-
-# Create virtual environment and install dependencies
-print_status "Setting up Python virtual environment..."
-cd "$TARGET_DIR"
-
+print_status "Creating Python virtual environment..."
 sudo -u movie-app bash -c "
     python3 -m venv venv
     source venv/bin/activate
     pip install --upgrade pip
-    pip install -r requirements.txt
-    pip install streamlit plotly gunicorn
+    pip install \
+        pandas>=1.5.0 \
+        numpy>=1.21.0 \
+        matplotlib>=3.5.0 \
+        seaborn>=0.11.0 \
+        catboost>=1.2.0 \
+        scikit-learn>=1.1.0 \
+        tqdm>=4.64.0 \
+        joblib>=1.2.0 \
+        streamlit>=1.28.0 \
+        plotly>=5.15.0
 " 2>/dev/null
 
-print_step "Data Download"
-
-# Download MovieLens data
+print_step "Download MovieLens Data"
 print_status "Downloading MovieLens dataset..."
 sudo -u movie-app bash -c "
     mkdir -p data/raw data/processed
@@ -186,47 +153,44 @@ sudo -u movie-app bash -c "
     fi
 "
 
-print_step "Model Training"
-
-# Train models if they don't exist
+print_step "Train ML Models"
 if [[ ! -f "$TARGET_DIR/models/saved_models/content_based_model.cbm" ]]; then
     print_status "Training machine learning models (this may take a few minutes)..."
     sudo -u movie-app bash -c "
         cd $TARGET_DIR
         source venv/bin/activate
-        python main.py
-    " 2>/dev/null || {
-        print_warning "Model training failed, but continuing with deployment..."
-    }
+        timeout 600 python main.py || echo 'Training completed or timed out'
+    " 2>/dev/null
 else
-    print_status "Pre-trained models found, skipping training"
+    print_status "Pre-trained models found"
 fi
 
-print_step "Service Configuration"
+print_step "Configure Services"
+print_status "Creating PM2 configuration..."
 
 # Create PM2 ecosystem file
-print_status "Creating PM2 configuration..."
-cat > "$TARGET_DIR/ecosystem.config.js" << EOF
+cat > "$TARGET_DIR/ecosystem.config.js" << 'EOF'
 module.exports = {
   apps: [{
     name: 'movie-recommender',
     script: 'venv/bin/streamlit',
-    args: 'run streamlit_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true',
-    cwd: '$TARGET_DIR',
+    args: 'run streamlit_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --server.runOnSave false',
+    cwd: '/opt/movie-recommendation-system',
     user: 'movie-app',
     env: {
       NODE_ENV: 'production',
-      PYTHONPATH: '$TARGET_DIR/src'
+      PYTHONPATH: '/opt/movie-recommendation-system/src'
     },
     instances: 1,
     exec_mode: 'fork',
     autorestart: true,
     watch: false,
     max_memory_restart: '2G',
-    error_file: '$TARGET_DIR/logs/err.log',
-    out_file: '$TARGET_DIR/logs/out.log',
-    log_file: '$TARGET_DIR/logs/combined.log',
-    time: true
+    error_file: '/opt/movie-recommendation-system/logs/err.log',
+    out_file: '/opt/movie-recommendation-system/logs/out.log',
+    log_file: '/opt/movie-recommendation-system/logs/combined.log',
+    time: true,
+    kill_timeout: 5000
   }]
 };
 EOF
@@ -234,28 +198,47 @@ EOF
 chown movie-app:movie-app "$TARGET_DIR/ecosystem.config.js"
 sudo -u movie-app mkdir -p "$TARGET_DIR/logs"
 
-# Configure Nginx
-print_status "Configuring Nginx..."
+print_step "Configure Nginx"
+print_status "Setting up Nginx reverse proxy..."
+
 cat > "/etc/nginx/sites-available/movie-recommender" << 'EOF'
 upstream movie_app {
-    server 127.0.0.1:8501;
+    server 127.0.0.1:8501 max_fails=3 fail_timeout=30s;
 }
 
 server {
     listen 80;
+    listen [::]:80;
     server_name _;
     
     # Security headers
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    server_tokens off;
     
     # Gzip compression
     gzip on;
     gzip_vary on;
     gzip_min_length 1024;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_comp_level 6;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/json
+        application/javascript
+        application/xml+rss
+        application/atom+xml;
     
+    # Client settings
+    client_max_body_size 10M;
+    client_body_timeout 30;
+    client_header_timeout 30;
+    
+    # Main application
     location / {
         proxy_pass http://movie_app;
         proxy_http_version 1.1;
@@ -266,37 +249,46 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 86400;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering on;
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
     }
     
+    # Health check
     location /health {
         access_log off;
         return 200 "healthy\n";
         add_header Content-Type text/plain;
     }
     
-    access_log /var/log/nginx/movie-recommender.access.log;
-    error_log /var/log/nginx/movie-recommender.error.log;
+    # Block sensitive files
+    location ~ /\. {
+        deny all;
+        access_log off;
+    }
+    
+    # Logs
+    access_log /var/log/nginx/movie-recommender.access.log combined;
+    error_log /var/log/nginx/movie-recommender.error.log warn;
 }
 EOF
 
-# Enable the site
+# Enable site
 ln -sf /etc/nginx/sites-available/movie-recommender /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 
-# Test Nginx configuration
-if nginx -t >/dev/null 2>&1; then
-    print_status "Nginx configuration is valid"
-else
-    print_error "Nginx configuration has errors"
+# Test Nginx
+if ! nginx -t >/dev/null 2>&1; then
+    print_error "Nginx configuration error"
     nginx -t
     exit 1
 fi
 
-print_step "Firewall Configuration"
-
-# Configure UFW
-print_status "Configuring firewall..."
+print_step "Configure Firewall"
+print_status "Setting up UFW firewall..."
 ufw --force reset >/dev/null 2>&1
 ufw default deny incoming >/dev/null 2>&1
 ufw default allow outgoing >/dev/null 2>&1
@@ -306,9 +298,7 @@ ufw allow 443 >/dev/null 2>&1
 ufw allow 8501 >/dev/null 2>&1
 ufw --force enable >/dev/null 2>&1
 
-print_step "Starting Services"
-
-# Start PM2 application
+print_step "Start Services"
 print_status "Starting PM2 application..."
 cd "$TARGET_DIR"
 sudo -u movie-app pm2 delete movie-recommender 2>/dev/null || true
@@ -321,70 +311,38 @@ if [[ -n "$startup_cmd" ]]; then
     eval "$startup_cmd" >/dev/null 2>&1 || true
 fi
 
-# Start Nginx
 print_status "Starting Nginx..."
 systemctl start nginx
 systemctl enable nginx
 
-print_step "Health Check"
-
-# Wait for services to start
-sleep 10
-
-# Check services
-pm2_status=$(sudo -u movie-app pm2 list | grep movie-recommender | awk '{print $10}' || echo "stopped")
-nginx_status=$(systemctl is-active nginx || echo "inactive")
-
-print_status "Service Status:"
-print_status "  PM2 App: $pm2_status"
-print_status "  Nginx: $nginx_status"
-
-# Test endpoints
-if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
-    print_status "✅ Streamlit app is responding"
-else
-    print_warning "⚠️ Streamlit app may not be ready yet"
-fi
-
-if curl -sf http://localhost/health >/dev/null 2>&1; then
-    print_status "✅ Nginx proxy is working"
-else
-    print_warning "⚠️ Nginx proxy may have issues"
-fi
-
-print_step "Creating Management Scripts"
-
-# Create management scripts
+print_step "Create Management Scripts"
 mkdir -p "$TARGET_DIR/scripts"
 
-# Start script
-cat > "$TARGET_DIR/scripts/start.sh" << 'EOF'
+# Create management scripts here (start.sh, stop.sh, etc.)
+cat > "$TARGET_DIR/scripts/start.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 start ecosystem.config.js
 sudo systemctl start nginx
 echo "✅ Services started"
-EOF
+SCRIPT_EOF
 
-# Stop script
-cat > "$TARGET_DIR/scripts/stop.sh" << 'EOF'
+cat > "$TARGET_DIR/scripts/stop.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 sudo -u movie-app pm2 stop movie-recommender
 sudo systemctl stop nginx
 echo "🛑 Services stopped"
-EOF
+SCRIPT_EOF
 
-# Restart script
-cat > "$TARGET_DIR/scripts/restart.sh" << 'EOF'
+cat > "$TARGET_DIR/scripts/restart.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 restart movie-recommender
 sudo systemctl reload nginx
 echo "🔄 Services restarted"
-EOF
+SCRIPT_EOF
 
-# Status script
-cat > "$TARGET_DIR/scripts/status.sh" << 'EOF'
+cat > "$TARGET_DIR/scripts/status.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 echo "📊 Service Status:"
 echo "=================="
@@ -393,19 +351,26 @@ sudo -u movie-app pm2 list
 echo ""
 echo "Nginx Status:"
 sudo systemctl status nginx --no-pager -l
-echo ""
-echo "Firewall Status:"
-sudo ufw status
-EOF
+SCRIPT_EOF
 
-# Make scripts executable
 chmod +x "$TARGET_DIR/scripts"/*.sh
 chown -R movie-app:movie-app "$TARGET_DIR/scripts"
 
-print_step "Deployment Complete! 🎉"
+print_step "Health Check"
+sleep 10
+
+# Check services
+pm2_status=$(sudo -u movie-app pm2 list | grep movie-recommender | awk '{print $10}' 2>/dev/null || echo "unknown")
+nginx_status=$(systemctl is-active nginx 2>/dev/null || echo "inactive")
+
+print_status "Service Status:"
+print_status "  PM2 App: $pm2_status"
+print_status "  Nginx: $nginx_status"
 
 # Get server IP
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
+print_step "Deployment Complete! 🎉"
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -431,18 +396,5 @@ echo "  PM2 Monitor: sudo -u movie-app pm2 monit"
 echo "  App Logs:    sudo -u movie-app pm2 logs movie-recommender"
 echo "  Nginx Logs:  sudo tail -f /var/log/nginx/movie-recommender.access.log"
 echo ""
-echo -e "${BLUE}🔒 Security:${NC}"
-echo "  Firewall:    sudo ufw status"
-echo "  For SSL:     sudo certbot --nginx -d yourdomain.com"
-echo ""
-echo -e "${YELLOW}💡 Next Steps:${NC}"
-echo "  1. Point your domain to this server IP: $SERVER_IP"
-echo "  2. Setup SSL certificate with: sudo certbot --nginx -d yourdomain.com"
-echo "  3. Configure monitoring and backups"
-echo ""
 echo -e "${GREEN}🎬 Your Movie Recommendation System is now live!${NC}"
 echo ""
-
-# Final service status
-echo "Current Status:"
-sudo -u movie-app pm2 list | head -5

@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# 🔧 Server Setup Script - Install all dependencies
-# This script installs Python, Node.js, PM2, Nginx, and other dependencies
+# 🔧 Server Setup Script
+# File: scripts/setup_server.sh
+# Install all dependencies for Movie Recommendation System
 
 set -e
 
