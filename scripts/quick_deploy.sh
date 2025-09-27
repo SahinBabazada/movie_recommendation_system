@@ -136,7 +136,8 @@ sudo -u movie-app bash -c "
         tqdm>=4.64.0 \
         joblib>=1.2.0 \
         streamlit>=1.28.0 \
-        plotly>=5.15.0
+        plotly>=5.15.0 \
+        pyyaml>=6.0
 " 2>/dev/null
 
 print_step "Download MovieLens Data"
@@ -168,7 +169,7 @@ fi
 print_step "Configure Services"
 print_status "Creating PM2 configuration..."
 
-# Create PM2 ecosystem file
+# Create PM2 ecosystem file - FIXED VERSION
 cat > "$TARGET_DIR/ecosystem.config.js" << 'EOF'
 module.exports = {
   apps: [{
@@ -176,7 +177,6 @@ module.exports = {
     script: 'venv/bin/streamlit',
     args: 'run streamlit_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --server.runOnSave false',
     cwd: '/opt/movie-recommendation-system',
-    user: 'movie-app',
     env: {
       NODE_ENV: 'production',
       PYTHONPATH: '/opt/movie-recommendation-system/src'
@@ -190,7 +190,8 @@ module.exports = {
     out_file: '/opt/movie-recommendation-system/logs/out.log',
     log_file: '/opt/movie-recommendation-system/logs/combined.log',
     time: true,
-    kill_timeout: 5000
+    kill_timeout: 5000,
+    restart_delay: 1000
   }]
 };
 EOF
@@ -301,14 +302,27 @@ ufw --force enable >/dev/null 2>&1
 print_step "Start Services"
 print_status "Starting PM2 application..."
 cd "$TARGET_DIR"
-sudo -u movie-app pm2 delete movie-recommender 2>/dev/null || true
-sudo -u movie-app pm2 start ecosystem.config.js
-sudo -u movie-app pm2 save
 
-# Setup PM2 startup
-startup_cmd=$(sudo -u movie-app pm2 startup | grep "sudo env" | head -1 || true)
-if [[ -n "$startup_cmd" ]]; then
-    eval "$startup_cmd" >/dev/null 2>&1 || true
+# FIXED PM2 startup - remove any existing processes first
+sudo -u movie-app pm2 kill 2>/dev/null || true
+sleep 3
+
+# Start PM2 as movie-app user without specifying user in config
+sudo -u movie-app bash -c "
+    cd $TARGET_DIR
+    export PM2_HOME=/home/movie-app/.pm2
+    pm2 start ecosystem.config.js
+    pm2 save
+"
+
+# Setup PM2 startup - FIXED
+print_status "Setting up PM2 auto-startup..."
+# Get startup command and execute it
+startup_script=$(sudo -u movie-app pm2 startup | grep -E '^sudo' | head -1 || true)
+if [[ -n "$startup_script" ]]; then
+    # Remove the user specification from the startup command if present
+    fixed_startup=$(echo "$startup_script" | sed 's/--uid [^ ]* --gid [^ ]* //')
+    eval "$fixed_startup" >/dev/null 2>&1 || true
 fi
 
 print_status "Starting Nginx..."
@@ -318,46 +332,71 @@ systemctl enable nginx
 print_step "Create Management Scripts"
 mkdir -p "$TARGET_DIR/scripts"
 
-# Create management scripts here (start.sh, stop.sh, etc.)
+# Create start script
 cat > "$TARGET_DIR/scripts/start.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 cd /opt/movie-recommendation-system
-sudo -u movie-app pm2 start ecosystem.config.js
+sudo -u movie-app pm2 start ecosystem.config.js 2>/dev/null || sudo -u movie-app pm2 restart movie-recommender
 sudo systemctl start nginx
 echo "✅ Services started"
+echo "🌐 Access at: http://localhost/"
 SCRIPT_EOF
 
 cat > "$TARGET_DIR/scripts/stop.sh" << 'SCRIPT_EOF'
 #!/bin/bash
-sudo -u movie-app pm2 stop movie-recommender
-sudo systemctl stop nginx
+sudo -u movie-app pm2 stop movie-recommender 2>/dev/null || echo "PM2 not running"
+sudo systemctl stop nginx 2>/dev/null || echo "Nginx not running"
 echo "🛑 Services stopped"
 SCRIPT_EOF
 
 cat > "$TARGET_DIR/scripts/restart.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 cd /opt/movie-recommendation-system
-sudo -u movie-app pm2 restart movie-recommender
+sudo -u movie-app pm2 restart movie-recommender 2>/dev/null || sudo -u movie-app pm2 start ecosystem.config.js
 sudo systemctl reload nginx
 echo "🔄 Services restarted"
+echo "🌐 Access at: http://localhost/"
 SCRIPT_EOF
 
 cat > "$TARGET_DIR/scripts/status.sh" << 'SCRIPT_EOF'
 #!/bin/bash
-echo "📊 Service Status:"
-echo "=================="
-echo "PM2 Processes:"
-sudo -u movie-app pm2 list
+echo "📊 Movie Recommendation System Status"
+echo "====================================="
 echo ""
-echo "Nginx Status:"
-sudo systemctl status nginx --no-pager -l
+echo "🔥 PM2 Processes:"
+sudo -u movie-app pm2 list 2>/dev/null || echo "PM2 not running"
+echo ""
+echo "🌐 Nginx Status:"
+if systemctl is-active --quiet nginx; then
+    echo "✅ Nginx is running"
+else
+    echo "❌ Nginx is not running"
+fi
+echo ""
+echo "🌐 Access URLs:"
+echo "  Local:    http://localhost/"
+echo "  Direct:   http://localhost:8501"
+echo "  Health:   http://localhost/health"
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+if [[ -n "$SERVER_IP" ]]; then
+    echo "  Public:   http://$SERVER_IP/"
+    echo "  Direct:   http://$SERVER_IP:8501"
+fi
+echo ""
+echo "🧪 Health Check:"
+if curl -sf http://localhost/health >/dev/null 2>&1; then
+    echo "✅ Application is responding"
+else
+    echo "❌ Application is not responding"
+fi
 SCRIPT_EOF
 
 chmod +x "$TARGET_DIR/scripts"/*.sh
 chown -R movie-app:movie-app "$TARGET_DIR/scripts"
 
 print_step "Health Check"
-sleep 10
+print_status "Waiting for services to start..."
+sleep 15
 
 # Check services
 pm2_status=$(sudo -u movie-app pm2 list | grep movie-recommender | awk '{print $10}' 2>/dev/null || echo "unknown")
@@ -366,6 +405,21 @@ nginx_status=$(systemctl is-active nginx 2>/dev/null || echo "inactive")
 print_status "Service Status:"
 print_status "  PM2 App: $pm2_status"
 print_status "  Nginx: $nginx_status"
+
+# Test application endpoints
+if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+    print_status "✅ Streamlit application is responding"
+elif curl -sf http://localhost:8501 >/dev/null 2>&1; then
+    print_status "✅ Streamlit application is accessible"
+else
+    print_warning "⚠️ Streamlit application may still be starting..."
+fi
+
+if curl -sf http://localhost/health >/dev/null 2>&1; then
+    print_status "✅ Nginx proxy is working"
+else
+    print_warning "⚠️ Nginx proxy may have issues"
+fi
 
 # Get server IP
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
@@ -377,24 +431,43 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║                   🎉 DEPLOYMENT SUCCESSFUL! 🎉                ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BLUE}🌐 Access Your Movie Recommendation System:${NC}"
+echo -e "${BLUE}🌐 Your Movie Recommendation System is now live!${NC}"
+echo ""
+echo "📍 Access URLs:"
 echo "  Local:      http://localhost/"
 echo "  Direct:     http://localhost:8501"
 if [[ -n "$SERVER_IP" ]]; then
     echo "  Public:     http://$SERVER_IP/"
     echo "  Direct:     http://$SERVER_IP:8501"
 fi
+echo "  Health:     http://localhost/health"
 echo ""
-echo -e "${BLUE}🛠️ Management Commands:${NC}"
+echo "🛠️ Management Commands:"
 echo "  Start:      $TARGET_DIR/scripts/start.sh"
 echo "  Stop:       $TARGET_DIR/scripts/stop.sh"
 echo "  Restart:    $TARGET_DIR/scripts/restart.sh"
 echo "  Status:     $TARGET_DIR/scripts/status.sh"
 echo ""
-echo -e "${BLUE}📊 Monitoring:${NC}"
+echo "📊 Monitoring:"
 echo "  PM2 Monitor: sudo -u movie-app pm2 monit"
 echo "  App Logs:    sudo -u movie-app pm2 logs movie-recommender"
 echo "  Nginx Logs:  sudo tail -f /var/log/nginx/movie-recommender.access.log"
 echo ""
-echo -e "${GREEN}🎬 Your Movie Recommendation System is now live!${NC}"
+echo "🔒 For SSL setup (optional):"
+echo "  $TARGET_DIR/scripts/setup_ssl.sh yourdomain.com"
 echo ""
+echo -e "${GREEN}🎬 Your Movie Recommendation System is ready to use!${NC}"
+echo ""
+echo "🎯 What you can do now:"
+echo "  1. Open your browser and go to http://localhost/"
+echo "  2. Try the interactive movie recommendations"
+echo "  3. Explore different users and see their personalized suggestions"
+echo "  4. Check system status: $TARGET_DIR/scripts/status.sh"
+echo ""
+
+# Show final PM2 status
+echo "📊 Current PM2 Status:"
+sudo -u movie-app pm2 list 2>/dev/null | head -4 || echo "PM2 status not available"
+
+echo ""
+echo "✅ Deployment completed successfully!"
