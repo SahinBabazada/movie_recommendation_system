@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# 🚀 Start Services Script
+# 🚀 Start Services Script with External Access
 # File: scripts/start.sh
-# Start Movie Recommendation System services
+# Start Movie Recommendation System services with external access information
 
 set -e
 
@@ -29,7 +29,7 @@ print_step() {
 APP_DIR="/opt/movie-recommendation-system"
 APP_USER="movie-app"
 
-echo "🚀 Starting Movie Recommendation System..."
+echo "🚀 Starting Movie Recommendation System with External Access..."
 
 # Check if application directory exists
 if [[ ! -d "$APP_DIR" ]]; then
@@ -83,7 +83,7 @@ systemctl enable nginx
 print_step "Health Check"
 
 # Wait for services to start
-sleep 5
+sleep 8
 
 # Check PM2 status
 if sudo -u "$APP_USER" pm2 list | grep -q "movie-recommender.*online"; then
@@ -105,9 +105,11 @@ fi
 
 # Check application health
 if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
-    print_status "✅ Application is responding"
+    print_status "✅ Streamlit application is responding"
+elif curl -sf http://localhost:8501 >/dev/null 2>&1; then
+    print_status "✅ Streamlit application is accessible"
 else
-    print_status "⚠️ Application may still be starting up..."
+    print_status "⚠️ Streamlit application may still be starting up..."
 fi
 
 # Check proxy health
@@ -119,16 +121,29 @@ fi
 
 print_step "Service Information"
 
+# Get server IP
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
 echo ""
 echo "🎬 Movie Recommendation System Started!"
 echo ""
 echo "📊 Service Status:"
-sudo -u "$APP_USER" pm2 list
+sudo -u "$APP_USER" pm2 list | head -4
 echo ""
 echo "🌐 Access URLs:"
-echo "  Local:       http://localhost/"
-echo "  Direct:      http://localhost:8501"
-echo "  Health:      http://localhost/health"
+echo "  🌍 External Access:"
+if [[ -n "$SERVER_IP" ]]; then
+    echo "    Main App:     http://$SERVER_IP/"
+    echo "    Direct App:   http://$SERVER_IP:8501"
+    echo "    Health Check: http://$SERVER_IP/health"
+else
+    echo "    Could not determine external IP"
+fi
+echo ""
+echo "  🏠 Local Access:"
+echo "    Main App:     http://localhost/"
+echo "    Direct App:   http://localhost:8501"
+echo "    Health Check: http://localhost/health"
 echo ""
 echo "🛠️ Management Commands:"
 echo "  Stop:        $APP_DIR/scripts/stop.sh"
@@ -136,5 +151,12 @@ echo "  Restart:     $APP_DIR/scripts/restart.sh"
 echo "  Status:      $APP_DIR/scripts/status.sh"
 echo "  Logs:        sudo -u $APP_USER pm2 logs movie-recommender"
 echo ""
+echo "🔧 If you can't access externally, check:"
+echo "  1. Your cloud provider's firewall/security groups"
+echo "  2. Run: sudo ufw status"
+echo "  3. Test local access: curl http://localhost/health"
+echo "  4. Check if ports 80 and 8501 are open in your VPS settings"
+echo ""
 
 echo "✅ All services started successfully!"
+echo "🌐 Try accessing http://$SERVER_IP/ in your browser!"

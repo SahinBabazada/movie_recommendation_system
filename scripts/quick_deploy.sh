@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# 🚀 Quick Deploy Script - Movie Recommendation System
+# 🚀 Quick Deploy Script - Movie Recommendation System with External Access
 # File: scripts/quick_deploy.sh
-# Complete automated deployment for Ubuntu server
+# Complete automated deployment for Ubuntu server with external access
 
 set -e
 
@@ -19,6 +19,7 @@ cat << "EOF"
 ║                                                              ║
 ║           🎬 Movie Recommendation System                      ║
 ║                  Quick Deployment                            ║
+║                 with External Access                         ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 EOF
@@ -54,9 +55,13 @@ TARGET_DIR="/opt/movie-recommendation-system"
 print_status "🎯 Project directory: $PROJECT_DIR"
 print_status "🖥️  Operating System: $(lsb_release -d | cut -f2)"
 
+# Get server IP for display
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+print_status "🌐 Server IP: ${SERVER_IP:-'Detecting...'}"
+
 # Confirmation
 echo ""
-read -p "🚀 Deploy Movie Recommendation System? This will install dependencies and configure services. Continue? (y/N): " confirm
+read -p "🚀 Deploy Movie Recommendation System with external access? This will install dependencies and configure services. Continue? (y/N): " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     print_status "Deployment cancelled"
     exit 0
@@ -83,7 +88,8 @@ apt install -y \
     ufw \
     htop \
     certbot \
-    python3-certbot-nginx >/dev/null 2>&1
+    python3-certbot-nginx \
+    net-tools >/dev/null 2>&1
 
 # Install Node.js
 if ! command -v node >/dev/null 2>&1; then
@@ -166,20 +172,22 @@ else
     print_status "Pre-trained models found"
 fi
 
-print_step "Configure Services"
-print_status "Creating PM2 configuration..."
+print_step "Configure Services for External Access"
+print_status "Creating PM2 configuration with external access..."
 
-# Create PM2 ecosystem file - FIXED VERSION
+# Create PM2 ecosystem file - EXTERNAL ACCESS VERSION
 cat > "$TARGET_DIR/ecosystem.config.js" << 'EOF'
 module.exports = {
   apps: [{
     name: 'movie-recommender',
     script: 'venv/bin/streamlit',
-    args: 'run streamlit_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --server.runOnSave false',
+    args: 'run streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --server.runOnSave false --server.allowRunOnSave false',
     cwd: '/opt/movie-recommendation-system',
     env: {
       NODE_ENV: 'production',
-      PYTHONPATH: '/opt/movie-recommendation-system/src'
+      PYTHONPATH: '/opt/movie-recommendation-system/src',
+      STREAMLIT_SERVER_ENABLE_CORS: 'false',
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: 'false'
     },
     instances: 1,
     exec_mode: 'fork',
@@ -199,8 +207,8 @@ EOF
 chown movie-app:movie-app "$TARGET_DIR/ecosystem.config.js"
 sudo -u movie-app mkdir -p "$TARGET_DIR/logs"
 
-print_step "Configure Nginx"
-print_status "Setting up Nginx reverse proxy..."
+print_step "Configure Nginx for External Access"
+print_status "Setting up Nginx reverse proxy with external access..."
 
 cat > "/etc/nginx/sites-available/movie-recommender" << 'EOF'
 upstream movie_app {
@@ -288,26 +296,26 @@ if ! nginx -t >/dev/null 2>&1; then
     exit 1
 fi
 
-print_step "Configure Firewall"
-print_status "Setting up UFW firewall..."
+print_step "Configure Firewall for External Access"
+print_status "Setting up UFW firewall for external access..."
 ufw --force reset >/dev/null 2>&1
 ufw default deny incoming >/dev/null 2>&1
 ufw default allow outgoing >/dev/null 2>&1
 ufw allow ssh >/dev/null 2>&1
-ufw allow 80 >/dev/null 2>&1
-ufw allow 443 >/dev/null 2>&1
-ufw allow 8501 >/dev/null 2>&1
+ufw allow from any to any port 80 comment 'HTTP for Movie Recommender' >/dev/null 2>&1
+ufw allow from any to any port 443 comment 'HTTPS for Movie Recommender' >/dev/null 2>&1
+ufw allow from any to any port 8501 comment 'Streamlit for Movie Recommender' >/dev/null 2>&1
 ufw --force enable >/dev/null 2>&1
 
 print_step "Start Services"
-print_status "Starting PM2 application..."
+print_status "Starting PM2 application with external access..."
 cd "$TARGET_DIR"
 
 # FIXED PM2 startup - remove any existing processes first
 sudo -u movie-app pm2 kill 2>/dev/null || true
 sleep 3
 
-# Start PM2 as movie-app user without specifying user in config
+# Start PM2 as movie-app user
 sudo -u movie-app bash -c "
     cd $TARGET_DIR
     export PM2_HOME=/home/movie-app/.pm2
@@ -315,12 +323,11 @@ sudo -u movie-app bash -c "
     pm2 save
 "
 
-# Setup PM2 startup - FIXED
+# Setup PM2 startup
 print_status "Setting up PM2 auto-startup..."
-# Get startup command and execute it
 startup_script=$(sudo -u movie-app pm2 startup | grep -E '^sudo' | head -1 || true)
 if [[ -n "$startup_script" ]]; then
-    # Remove the user specification from the startup command if present
+    # Remove problematic flags if present
     fixed_startup=$(echo "$startup_script" | sed 's/--uid [^ ]* --gid [^ ]* //')
     eval "$fixed_startup" >/dev/null 2>&1 || true
 fi
@@ -332,14 +339,19 @@ systemctl enable nginx
 print_step "Create Management Scripts"
 mkdir -p "$TARGET_DIR/scripts"
 
-# Create start script
+# Create updated management scripts with external access info
 cat > "$TARGET_DIR/scripts/start.sh" << 'SCRIPT_EOF'
 #!/bin/bash
 cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 start ecosystem.config.js 2>/dev/null || sudo -u movie-app pm2 restart movie-recommender
 sudo systemctl start nginx
+
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo "✅ Services started"
-echo "🌐 Access at: http://localhost/"
+echo "🌐 Access URLs:"
+echo "  External: http://$SERVER_IP/"
+echo "  Direct:   http://$SERVER_IP:8501"
+echo "  Local:    http://localhost/"
 SCRIPT_EOF
 
 cat > "$TARGET_DIR/scripts/stop.sh" << 'SCRIPT_EOF'
@@ -354,57 +366,33 @@ cat > "$TARGET_DIR/scripts/restart.sh" << 'SCRIPT_EOF'
 cd /opt/movie-recommendation-system
 sudo -u movie-app pm2 restart movie-recommender 2>/dev/null || sudo -u movie-app pm2 start ecosystem.config.js
 sudo systemctl reload nginx
-echo "🔄 Services restarted"
-echo "🌐 Access at: http://localhost/"
-SCRIPT_EOF
 
-cat > "$TARGET_DIR/scripts/status.sh" << 'SCRIPT_EOF'
-#!/bin/bash
-echo "📊 Movie Recommendation System Status"
-echo "====================================="
-echo ""
-echo "🔥 PM2 Processes:"
-sudo -u movie-app pm2 list 2>/dev/null || echo "PM2 not running"
-echo ""
-echo "🌐 Nginx Status:"
-if systemctl is-active --quiet nginx; then
-    echo "✅ Nginx is running"
-else
-    echo "❌ Nginx is not running"
-fi
-echo ""
-echo "🌐 Access URLs:"
-echo "  Local:    http://localhost/"
-echo "  Direct:   http://localhost:8501"
-echo "  Health:   http://localhost/health"
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-if [[ -n "$SERVER_IP" ]]; then
-    echo "  Public:   http://$SERVER_IP/"
-    echo "  Direct:   http://$SERVER_IP:8501"
-fi
-echo ""
-echo "🧪 Health Check:"
-if curl -sf http://localhost/health >/dev/null 2>&1; then
-    echo "✅ Application is responding"
-else
-    echo "❌ Application is not responding"
-fi
+echo "🔄 Services restarted"
+echo "🌐 Access at: http://$SERVER_IP/"
 SCRIPT_EOF
 
 chmod +x "$TARGET_DIR/scripts"/*.sh
 chown -R movie-app:movie-app "$TARGET_DIR/scripts"
 
 print_step "Health Check"
-print_status "Waiting for services to start..."
+print_status "Waiting for services to start with external access..."
 sleep 15
 
 # Check services
-pm2_status=$(sudo -u movie-app pm2 list | grep movie-recommender | awk '{print $10}' 2>/dev/null || echo "unknown")
+pm2_status=$(sudo -u "$APP_USER" pm2 list | grep movie-recommender | awk '{print $10}' 2>/dev/null || echo "unknown")
 nginx_status=$(systemctl is-active nginx 2>/dev/null || echo "inactive")
 
 print_status "Service Status:"
 print_status "  PM2 App: $pm2_status"
 print_status "  Nginx: $nginx_status"
+
+# Check if external access is configured
+if netstat -tlnp 2>/dev/null | grep ":8501 " | grep -q "0.0.0.0:8501"; then
+    print_status "✅ Streamlit configured for external access"
+else
+    print_warning "⚠️ Streamlit may not be configured for external access yet"
+fi
 
 # Test application endpoints
 if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
@@ -421,32 +409,45 @@ else
     print_warning "⚠️ Nginx proxy may have issues"
 fi
 
-# Get server IP
-SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+# Update server IP if not detected earlier
+if [[ -z "$SERVER_IP" ]]; then
+    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+fi
 
 print_step "Deployment Complete! 🎉"
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║                   🎉 DEPLOYMENT SUCCESSFUL! 🎉                ║${NC}"
+echo -e "${GREEN}║                    with External Access                      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BLUE}🌐 Your Movie Recommendation System is now live!${NC}"
+echo -e "${BLUE}🌐 Your Movie Recommendation System is now live with external access!${NC}"
 echo ""
 echo "📍 Access URLs:"
-echo "  Local:      http://localhost/"
-echo "  Direct:     http://localhost:8501"
+echo ""
+echo "  🌍 External Access (from anywhere):"
 if [[ -n "$SERVER_IP" ]]; then
-    echo "  Public:     http://$SERVER_IP/"
-    echo "  Direct:     http://$SERVER_IP:8501"
+    echo "    Main Application: http://$SERVER_IP/"
+    echo "    Direct Streamlit: http://$SERVER_IP:8501"
+    echo "    Health Check:     http://$SERVER_IP/health"
+else
+    echo "    Could not determine external IP - check manually"
 fi
-echo "  Health:     http://localhost/health"
+echo ""
+echo "  🏠 Local Access:"
+echo "    Main Application: http://localhost/"
+echo "    Direct Streamlit: http://localhost:8501"
+echo "    Health Check:     http://localhost/health"
 echo ""
 echo "🛠️ Management Commands:"
-echo "  Start:      $TARGET_DIR/scripts/start.sh"
-echo "  Stop:       $TARGET_DIR/scripts/stop.sh"
-echo "  Restart:    $TARGET_DIR/scripts/restart.sh"
-echo "  Status:     $TARGET_DIR/scripts/status.sh"
+echo "  Start:    $TARGET_DIR/scripts/start.sh"
+echo "  Stop:     $TARGET_DIR/scripts/stop.sh"
+echo "  Restart:  $TARGET_DIR/scripts/restart.sh"
+echo "  Status:   $TARGET_DIR/scripts/status.sh"
+echo ""
+echo "🔥 Firewall Status:"
+ufw status | grep -E "(Status|80|8501|443)" | head -4
 echo ""
 echo "📊 Monitoring:"
 echo "  PM2 Monitor: sudo -u movie-app pm2 monit"
@@ -456,18 +457,25 @@ echo ""
 echo "🔒 For SSL setup (optional):"
 echo "  $TARGET_DIR/scripts/setup_ssl.sh yourdomain.com"
 echo ""
-echo -e "${GREEN}🎬 Your Movie Recommendation System is ready to use!${NC}"
+echo -e "${GREEN}🎬 Your Movie Recommendation System is ready for external access!${NC}"
 echo ""
 echo "🎯 What you can do now:"
-echo "  1. Open your browser and go to http://localhost/"
+echo "  1. Open your browser and go to http://$SERVER_IP/"
 echo "  2. Try the interactive movie recommendations"
-echo "  3. Explore different users and see their personalized suggestions"
+echo "  3. Share the URL with others to try your system"
 echo "  4. Check system status: $TARGET_DIR/scripts/status.sh"
+echo ""
+echo "🔧 If external access doesn't work:"
+echo "  1. Check your cloud provider's security groups/firewall settings"
+echo "  2. Ensure ports 80 and 8501 are open in your VPS control panel"
+echo "  3. Run: $TARGET_DIR/scripts/configure_external_access.sh"
+echo "  4. Test from another network: curl -I http://$SERVER_IP/"
 echo ""
 
 # Show final PM2 status
-echo "📊 Current PM2 Status:"
+echo "📊 Current Service Status:"
 sudo -u movie-app pm2 list 2>/dev/null | head -4 || echo "PM2 status not available"
 
 echo ""
-echo "✅ Deployment completed successfully!"
+echo "✅ Deployment with external access completed successfully!"
+echo "🌐 Try accessing http://$SERVER_IP/ from any device!"

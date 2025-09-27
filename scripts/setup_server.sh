@@ -2,7 +2,7 @@
 
 # 🔧 Server Setup Script
 # File: scripts/setup_server.sh
-# Install all dependencies for Movie Recommendation System
+# Install all dependencies for Movie Recommendation System with external access
 
 set -e
 
@@ -47,7 +47,8 @@ apt install -y \
     htop \
     tree \
     vim \
-    build-essential
+    build-essential \
+    net-tools
 
 print_step "Python Installation"
 
@@ -139,6 +140,42 @@ EOF
 
 sysctl -p
 
+print_step "Configure External Access"
+
+# Configure for external access
+print_status "Configuring system for external connections..."
+
+# Update sysctl for better network performance and external access
+cat >> /etc/sysctl.conf << EOF
+
+# External access optimizations
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.all.rp_filter = 1
+EOF
+
+sysctl -p
+
+# Configure UFW for external access
+print_status "Configuring firewall for external access..."
+ufw --force reset >/dev/null 2>&1
+ufw default deny incoming >/dev/null 2>&1
+ufw default allow outgoing >/dev/null 2>&1
+
+# Allow SSH (important!)
+ufw allow ssh >/dev/null 2>&1
+
+# Allow HTTP and HTTPS from anywhere
+ufw allow from any to any port 80 >/dev/null 2>&1
+ufw allow from any to any port 443 >/dev/null 2>&1
+ufw allow from any to any port 8501 >/dev/null 2>&1
+
+# Enable firewall
+ufw --force enable >/dev/null 2>&1
+
+print_status "✅ External access configured!"
+
 print_step "Cleanup"
 
 # Clean up package cache
@@ -146,14 +183,22 @@ print_status "Cleaning up..."
 apt autoremove -y
 apt autoclean
 
+# Get server IP for display
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
 print_status "✅ Server setup completed successfully!"
 print_status "🔧 Dependencies installed:"
 print_status "  - Python $(python3 --version)"
 print_status "  - Node.js $(node --version)"
 print_status "  - PM2 $(pm2 --version)"
 print_status "  - Nginx $(nginx -v 2>&1 | cut -d' ' -f3)"
-print_status "  - UFW Firewall"
+print_status "  - UFW Firewall (configured for external access)"
 print_status "  - SSL tools (Certbot)"
 
 echo ""
+echo "🌐 Server Information:"
+echo "  External IP: ${SERVER_IP:-'Not available'}"
+echo "  Firewall Status: $(ufw status | head -1 | cut -d: -f2 | xargs)"
+echo ""
 echo "🚀 Ready for application deployment!"
+echo "🔥 External access configured - applications will be accessible from outside"
