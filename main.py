@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any  # Added missing imports
 import matplotlib.pyplot as plt
 
 # Add src directory to path so we can import our modules
@@ -109,7 +110,7 @@ class MovieRecommendationPipeline:
         self.is_trained = True
         print("\n✅ All models trained successfully!")
         
-    def evaluate_all_models(self) -> Dict:
+    def evaluate_all_models(self) -> Dict[str, Any]:
         """Evaluate and compare all recommendation approaches."""
         if not self.is_trained:
             raise ValueError("Models must be trained first")
@@ -191,7 +192,7 @@ class MovieRecommendationPipeline:
         
         return predictions_df
     
-    def demonstrate_recommendations(self, user_id: int = None, n_recs: int = 5) -> None:
+    def demonstrate_recommendations(self, user_id: Optional[int] = None, n_recs: int = 5) -> None:
         """Show sample recommendations from different systems."""
         if not self.is_trained:
             print("⚠️  Models must be trained first")
@@ -316,7 +317,7 @@ def run_advanced_analysis():
 def create_simple_inference_system():
     """Create a simple system for making predictions on new data."""
     
-    def predict_rating(user_features: dict, movie_features: dict) -> float:
+    def predict_rating(user_features: Dict[str, Any], movie_features: Dict[str, Any]) -> float:
         """
         Simple prediction function that mimics the trained models.
         
